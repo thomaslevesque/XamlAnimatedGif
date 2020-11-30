@@ -1,8 +1,8 @@
 ﻿using System;
 using System.IO;
 using Buffer = System.Buffer;
-using System.Runtime.CompilerServices;
 using System.Diagnostics;
+using CodeTable = XamlAnimatedGif.Decompression.LzwDecompressor.CodeTable;
 
 namespace XamlAnimatedGif.Decompression
 {
@@ -18,7 +18,7 @@ namespace XamlAnimatedGif.Decompression
         public LzwDecompressStream(byte[] compressedBuffer, int minimumCodeLength)
         {
             _reader = new BitReader(compressedBuffer);
-            _codeTable = new CodeTable(minimumCodeLength);
+            _codeTable = new CodeTable(minimumCodeLength, compressedBuffer.Length);
         }
         public override void Flush()
         {
@@ -82,21 +82,23 @@ namespace XamlAnimatedGif.Decompression
 
         private void InitCodeTable()
         {
-            _codeTable.Reset();
+            _codeTable.Clear();
             _prevCode = -1;
         }
 
-        private static byte[] CopySequenceToBuffer(byte[] sequence, byte[] buffer, int offset, int count, ref int read)
+        private static byte[] CopySequenceToBuffer(Span<byte> sequence, byte[] buffer, int offset, int count, ref int read)
         {
             int bytesToRead = Math.Min(sequence.Length, count - read);
-            Buffer.BlockCopy(sequence, 0, buffer, offset + read, bytesToRead);
+            sequence.Slice(0, bytesToRead).CopyTo(buffer.AsSpan(offset + read));
+            //Buffer.BlockCopy(sequence, 0, buffer, offset + read, bytesToRead);
             read += bytesToRead;
             byte[] remainingBytes = null;
             if (bytesToRead < sequence.Length)
             {
                 int remainingBytesCount = sequence.Length - bytesToRead;
                 remainingBytes = new byte[remainingBytesCount];
-                Buffer.BlockCopy(sequence, bytesToRead, remainingBytes, 0, remainingBytesCount);
+                sequence.Slice(bytesToRead, remainingBytesCount).CopyTo(remainingBytes.AsSpan());
+                //Buffer.BlockCopy(sequence, bytesToRead, remainingBytes, 0, remainingBytesCount);
             }
             return remainingBytes;
         }
@@ -124,128 +126,127 @@ namespace XamlAnimatedGif.Decompression
         {
             if (code < _codeTable.Count)
             {
-                var sequence = _codeTable[code];
-                if (sequence.IsStopCode)
+                if (_codeTable.IsStopCode(code))
                 {
                     return false;
                 }
-                if (sequence.IsClearCode)
+                if (_codeTable.IsClearCode(code))
                 {
                     InitCodeTable();
                     return true;
                 }
-                _remainingBytes = CopySequenceToBuffer(sequence.Bytes, buffer, offset, count, ref read);
+
+                var bytes = _codeTable[code];
+
+                _remainingBytes = CopySequenceToBuffer(bytes, buffer, offset, count, ref read);
                 if (_prevCode >= 0)
                 {
-                    var prev = _codeTable[_prevCode];
-                    var newSequence = prev.Append(sequence.Bytes[0]);
-                    _codeTable.Add(newSequence);
+                    var newBytes = _codeTable.Add(_prevCode, bytes[0]);
                 }
             }
             else
             {
-                var prev = _codeTable[_prevCode];
-                var newSequence = prev.Append(prev.Bytes[0]);
-                _codeTable.Add(newSequence);
-                _remainingBytes = CopySequenceToBuffer(newSequence.Bytes, buffer, offset, count, ref read);
+                var prevBytes = _codeTable[_prevCode];
+                var bytes = _codeTable.Add(_prevCode, prevBytes[0]);
+                _remainingBytes = CopySequenceToBuffer(bytes, buffer, offset, count, ref read);
             }
             _prevCode = code;
             return true;
         }
 
-        struct Sequence
-        {
-            public Sequence(byte[] bytes)
-                : this()
-            {
-                Bytes = bytes;
-            }
+        //struct Sequence
+        //{
+        //    public Sequence(byte[] bytes)
+        //        : this()
+        //    {
+        //        Bytes = bytes;
+        //    }
 
-            private Sequence(bool isClearCode, bool isStopCode)
-                : this()
-            {
-                IsClearCode = isClearCode;
-                IsStopCode = isStopCode;
-            }
+        //    private Sequence(bool isClearCode, bool isStopCode)
+        //        : this()
+        //    {
+        //        IsClearCode = isClearCode;
+        //        IsStopCode = isStopCode;
+        //    }
 
-            public byte[] Bytes { get; }
+        //    public byte[] Bytes { get; }
 
-            public bool IsClearCode { get; }
+        //    public bool IsClearCode { get; }
 
-            public bool IsStopCode { get; }
+        //    public bool IsStopCode { get; }
 
-            public static Sequence ClearCode { get; } = new Sequence(true, false);
+        //    public static Sequence ClearCode { get; } = new Sequence(true, false);
 
-            public static Sequence StopCode { get; } = new Sequence(false, true);
+        //    public static Sequence StopCode { get; } = new Sequence(false, true);
 
-            public Sequence Append(byte b)
-            {
-                var bytes = new byte[Bytes.Length + 1];
-                Bytes.CopyTo(bytes, 0);
-                bytes[Bytes.Length] = b;
-                return new Sequence(bytes);
-            }
-        }
+        //    public Sequence Append(byte b)
+        //    {
+        //        var bytes = new byte[Bytes.Length + 1];
+        //        Bytes.CopyTo(bytes, 0);
+        //        bytes[Bytes.Length] = b;
+        //        return new Sequence(bytes);
+        //    }
+        //}
 
-        class CodeTable
-        {
-            private readonly int _minimumCodeLength;
-            private readonly Sequence[] _table;
-            private int _count;
-            private int _codeLength;
+        //class CodeTable
+        //{
+        //    private readonly int _minimumCodeLength;
+        //    private readonly Sequence[] _table;
+        //    private int _count;
+        //    private int _codeLength;
 
-            public CodeTable(int minimumCodeLength)
-            {
-                _minimumCodeLength = minimumCodeLength;
-                _codeLength = _minimumCodeLength + 1;
-                int initialEntries = 1 << minimumCodeLength;
-                _table = new Sequence[1 << MaxCodeLength];
-                for (int i = 0; i < initialEntries; i++)
-                {
-                    _table[_count++] = new Sequence(new[] {(byte) i});
-                }
-                Add(Sequence.ClearCode);
-                Add(Sequence.StopCode);
-            }
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public void Reset()
-            {
-                _count = (1 << _minimumCodeLength) + 2;
-                _codeLength = _minimumCodeLength + 1;
-            }
+        //    public CodeTable(int minimumCodeLength)
+        //    {
+        //        _minimumCodeLength = minimumCodeLength;
+        //        _codeLength = _minimumCodeLength + 1;
+        //        int initialEntries = 1 << minimumCodeLength;
+        //        _table = new Sequence[1 << MaxCodeLength];
+        //        for (int i = 0; i < initialEntries; i++)
+        //        {
+        //            _table[_count++] = new Sequence(new[] {(byte) i});
+        //        }
+        //        Add(Sequence.ClearCode);
+        //        Add(Sequence.StopCode);
+        //    }
+        //    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        //    public void Reset()
+        //    {
+        //        _count = (1 << _minimumCodeLength) + 2;
+        //        _codeLength = _minimumCodeLength + 1;
+        //    }
 
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public void Add(Sequence sequence)
-            {
-                // Code table is full, stop adding new codes
-                if (_count >= _table.Length)
-                    return;
+        //    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        //    public void Add(Sequence sequence)
+        //    {
+        //        // Code table is full, stop adding new codes
+        //        if (_count >= _table.Length)
+        //            return;
 
-                _table[_count++] = sequence;
-                if ((_count & (_count - 1)) == 0 && _codeLength < MaxCodeLength)
-                    _codeLength++;
-            }
+        //        _table[_count++] = sequence;
+        //        if ((_count & (_count - 1)) == 0 && _codeLength < MaxCodeLength)
+        //            _codeLength++;
+        //    }
 
-            public Sequence this[int index]
-            {
-                [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                get
-                {
-                    return _table[index];
-                }
-            }
+        //    public Sequence this[int index]
+        //    {
+        //        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        //        get
+        //        {
+        //            return _table[index];
+        //        }
+        //    }
 
-            public int Count
-            {
-                [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                get { return _count; }
-            }
+        //    public int Count
+        //    {
+        //        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        //        get { return _count; }
+        //    }
 
-            public int CodeLength
-            {
-                [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                get { return _codeLength; }
-            }
-        }
+        //    public int CodeLength
+        //    {
+        //        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        //        get { return _codeLength; }
+        //    }
+        //}
     }
 }
