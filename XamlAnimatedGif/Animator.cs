@@ -29,6 +29,7 @@ namespace XamlAnimatedGif
         private readonly int _stride;
         private readonly byte[] _previousBackBuffer;
         private readonly byte[] _compressedFrameBuffer;
+        private readonly byte[] _zeroLineBuffer;
         private readonly MemoryStream _indexStream;
         private readonly TimingManager _timingManager;
 
@@ -47,6 +48,8 @@ namespace XamlAnimatedGif
             _previousBackBuffer = BufferPool.Rent(desc.Height * _stride);
             int largestCompressedFrameSize = (int)GetLargestCompressedFrameSize(metadata, sourceStream.Length);
             _compressedFrameBuffer = BufferPool.Rent(largestCompressedFrameSize);
+            _zeroLineBuffer = BufferPool.Rent(_stride);
+            Array.Clear(_zeroLineBuffer, 0, _stride);
             // We don't know how much size will be necessary for the uncompressed index stream.
             // Start at largestCompressedFrameSize * 2, will resize if necessary.
             _indexStream = new MemoryStream(largestCompressedFrameSize * 2);
@@ -339,6 +342,7 @@ namespace XamlAnimatedGif
                             WriteColor(lineBuffer, palette[index], i);
                         }
                     }
+
                     CopyToBitmap(lineBuffer, _bitmap, offset, bufferLength);
                 }
                 _bitmap.AddDirtyRect(rect);
@@ -401,6 +405,7 @@ namespace XamlAnimatedGif
 
         private void DisposePreviousFrame(GifFrame currentFrame)
         {
+            var desc = _metadata.Header.LogicalScreenDescriptor;
             var pgce = _previousFrame?.GraphicControl;
             if (pgce != null)
             {
@@ -419,8 +424,7 @@ namespace XamlAnimatedGif
                     }
                     case GifFrameDisposalMethod.RestorePrevious:
                     {
-                        CopyToBitmap(_previousBackBuffer, _bitmap, 0, _previousBackBuffer.Length);
-                        var desc = _metadata.Header.LogicalScreenDescriptor;
+                        CopyToBitmap(_previousBackBuffer, _bitmap, 0, desc.Height * _stride);
                         var rect = new Int32Rect(0, 0, desc.Width, desc.Height);
                         _bitmap.AddDirtyRect(rect);
                         break;
@@ -431,7 +435,7 @@ namespace XamlAnimatedGif
             var gce = currentFrame.GraphicControl;
             if (gce != null && gce.DisposalMethod == GifFrameDisposalMethod.RestorePrevious)
             {
-                CopyFromBitmap(_previousBackBuffer, _bitmap, 0, _previousBackBuffer.Length);
+                CopyFromBitmap(_previousBackBuffer, _bitmap, 0, desc.Height * _stride);
             }
         }
 
@@ -443,11 +447,10 @@ namespace XamlAnimatedGif
         private void ClearArea(Int32Rect rect)
         {
             int bufferLength = 4 * rect.Width;
-            using var lineBuffer = BufferPool.Borrow(bufferLength);
             for (int y = 0; y < rect.Height; y++)
             {
                 int offset = (rect.Y + y) * _stride + 4 * rect.X;
-                CopyToBitmap(lineBuffer, _bitmap, offset, bufferLength);
+                CopyToBitmap(_zeroLineBuffer, _bitmap, offset, bufferLength);
             }
 
             _bitmap.AddDirtyRect(new Int32Rect(rect.X, rect.Y, rect.Width, rect.Height));
@@ -532,6 +535,7 @@ namespace XamlAnimatedGif
                 }
                 BufferPool.Return(_compressedFrameBuffer);
                 BufferPool.Return(_previousBackBuffer);
+                BufferPool.Return(_zeroLineBuffer);
                 _indexStream.Dispose();
                 _disposed = true;
             }
