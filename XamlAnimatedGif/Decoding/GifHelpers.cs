@@ -21,6 +21,20 @@ namespace XamlAnimatedGif.Decoding
             await CopyDataBlocksToStreamAsync(sourceStream, Stream.Null, cancellationToken);
         }
 
+        public static async Task<int> ReadDataBlocksAsync(Stream sourceStream, byte[] buffer, CancellationToken cancellationToken = default)
+        {
+            int offset = 0;
+            int len;
+            // the length is on 1 byte, so each data sub-block can't be more than 255 bytes long
+            while ((len = await sourceStream.ReadByteAsync(cancellationToken).ConfigureAwait(false)) > 0)
+            {
+                await sourceStream.ReadAllAsync(buffer, offset, len, cancellationToken).ConfigureAwait(false);
+                offset += len;
+            }
+
+            return offset;
+        }
+
         public static async Task<byte[]> ReadDataBlocksAsync(Stream stream, CancellationToken cancellationToken = default)
         {
             using var ms = new MemoryStream();

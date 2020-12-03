@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Buffers;
+using System.IO;
+using XamlAnimatedGif.Extensions;
 
 namespace XamlAnimatedGif.Decompression
 {
@@ -7,12 +9,49 @@ namespace XamlAnimatedGif.Decompression
     {
         private const int MaxCodeLength = 12;
 
-        public static void Decompress(Span<byte> codeStream, int minimumCodeLength, Span<byte> indexStream)
+        public static void Decompress(Memory<byte> codeStream, int minimumCodeLength, Stream output)
         {
-            using var codeTable = new CodeTable(minimumCodeLength, codeStream.Length);
+            using var codeTable = new CodeTable(minimumCodeLength);
+            var bitReader = new BitReader(codeStream);
+            int prevCode = -1;
+            while (bitReader.TryReadBits(codeTable.CodeLength, out int code))
+            {
+                if (code < codeTable.Count)
+                {
+                    if (codeTable.IsStopCode(code))
+                    {
+                        return;
+                    }
+
+                    if (codeTable.IsClearCode(code))
+                    {
+                        codeTable.Clear();
+                        prevCode = -1;
+                        continue;
+                    }
+
+                    var sequence = codeTable[code];
+                    output.Write(sequence);
+
+                    if (prevCode >= 0)
+                    {
+                        var prev = codeTable[prevCode];
+                        codeTable.AddNextCode(prevCode, sequence[0]);
+                    }
+                }
+                else
+                {
+                    var prevSequence = codeTable[prevCode];
+                    codeTable.AddNextCode(prevCode, prevSequence[0]);
+
+                    output.Write(prevSequence);
+                    output.WriteByte(prevSequence[0]);
+                }
+                prevCode = code;
+            }
         }
 
-        public class CodeTable : IDisposable
+        private class CodeTable : IDisposable
         {
             // Initial codes, with sequences of length 1, where the code is equal to the color index (0-255)
             private static readonly byte[] InitialCodeTableBuffer;
@@ -39,15 +78,15 @@ namespace XamlAnimatedGif.Decompression
             private int _count;
             private int _nextOffset;
 
-            public CodeTable(int minimumCodeLength, int codeStreamLength)
+            public CodeTable(int minimumCodeLength)
             {
                 _minimumCodeLength = minimumCodeLength;
-                var initialEntriesCount = (1 << _minimumCodeLength);
+                var initialEntriesCount = 1 << _minimumCodeLength;
                 _clearCode = initialEntriesCount;
                 _stopCode = initialEntriesCount + 1;
 
-                _buffer = ArrayPool<byte>.Shared.Rent(codeStreamLength);
-                _codeTable = ArrayPool<(int, int)>.Shared.Rent((1 << MaxCodeLength));
+                _buffer = ArrayPool<byte>.Shared.Rent(1 << MaxCodeLength);
+                _codeTable = ArrayPool<(int, int)>.Shared.Rent(1 << MaxCodeLength);
                 Buffer.BlockCopy(InitialCodeTableBuffer, 0, _buffer, 0, initialEntriesCount);
                 Array.Copy(InitialCodeTable, 0, _codeTable, 0, initialEntriesCount);
 
@@ -60,8 +99,8 @@ namespace XamlAnimatedGif.Decompression
             {
                 get
                 {
-                    var entry = _codeTable[code];
-                    return _buffer.AsSpan(entry.offset, entry.length);
+                    var (offset, length) = _codeTable[code];
+                    return _buffer.AsSpan(offset, length);
                 }
             }
 
@@ -75,22 +114,19 @@ namespace XamlAnimatedGif.Decompression
             public void Clear()
             {
                 _codeLength = _minimumCodeLength + 1;
-                var initialEntriesCount = (1 << _minimumCodeLength);
+                var initialEntriesCount = 1 << _minimumCodeLength;
                 _count = initialEntriesCount + 2;
                 _nextOffset = initialEntriesCount + 2;
             }
 
-            public Span<byte> Add(int previousCode, byte value)
+            public void AddNextCode(int previousCode, byte newValue)
             {
-                var previousEntry = _codeTable[previousCode];
-                int destLength = previousEntry.length + 1;
+                var (previousOffset, previousLength) = _codeTable[previousCode];
+                int destLength = previousLength + 1;
                 if (_count >= _codeTable.Length)
                 {
                     // Can't add more codes
-                    var bytes = new byte[destLength];
-                    this[previousCode].CopyTo(bytes);
-                    bytes[destLength - 1] = value;
-                    return bytes;
+                    return;
                 }
 
                 int destOffset;
@@ -98,7 +134,7 @@ namespace XamlAnimatedGif.Decompression
                 {
                     // The previous entry is at the end of the table, so just reuse the same bytes
                     // and append the new one. No need to copy anything.
-                    destOffset = previousEntry.offset;
+                    destOffset = previousOffset;
                     EnsureCapacity(destOffset + destLength);
                 }
                 else
@@ -106,18 +142,16 @@ namespace XamlAnimatedGif.Decompression
                     // Copy previous entry to the end
                     destOffset = _nextOffset;
                     EnsureCapacity(destOffset + destLength);
-                    Buffer.BlockCopy(_buffer, previousEntry.offset, _buffer, destOffset, previousEntry.length);
+                    Buffer.BlockCopy(_buffer, previousOffset, _buffer, destOffset, previousLength);
                 }
 
                 // Actually append the new value
-                _buffer[destOffset + destLength - 1] = value;
+                _buffer[destOffset + destLength - 1] = newValue;
                 _codeTable[_count++] = (destOffset, destLength);
                 _nextOffset = destOffset + destLength;
 
                 if ((_count & (_count - 1)) == 0 && _codeLength < MaxCodeLength)
                     _codeLength++;
-
-                return _buffer.AsSpan(destOffset, destLength);
             }
 
             public void Dispose()

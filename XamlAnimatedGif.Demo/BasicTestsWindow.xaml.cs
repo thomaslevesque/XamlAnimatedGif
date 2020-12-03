@@ -70,11 +70,13 @@ namespace XamlAnimatedGif.Demo
             {
                 var frame = gif.Frames[i];
                 fileStream.Seek(frame.ImageData.CompressedDataStartOffset, SeekOrigin.Begin);
-                using var ms = new MemoryStream();
-                await GifHelpers.CopyDataBlocksToStreamAsync(fileStream, ms);
-                using var lzwStream = new LzwDecompressStream(ms.GetBuffer(), frame.ImageData.LzwMinimumCodeSize);
+                using var compressedStream = new MemoryStream();
+                using var indexStream = new MemoryStream();
+                await GifHelpers.CopyDataBlocksToStreamAsync(fileStream, compressedStream);
+                LzwDecompressor.Decompress(compressedStream.ToArray(), frame.ImageData.LzwMinimumCodeSize, indexStream);
                 using var indOutStream = File.OpenWrite($"{path}.{i}.ind");
-                await lzwStream.CopyToAsync(indOutStream);
+                indexStream.Position = 0;
+                await indexStream.CopyToAsync(indOutStream);
             }
         }
 

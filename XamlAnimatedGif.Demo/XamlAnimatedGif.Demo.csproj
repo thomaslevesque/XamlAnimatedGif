@@ -24,4 +24,9 @@
     <Resource Include="Images/*" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Resource Remove="Images\siteoforigin.gif" />
+    <Content Include="Images\siteoforigin.gif" CopyToOutputDirectory="Always" />
+  </ItemGroup>
+
 </Project>

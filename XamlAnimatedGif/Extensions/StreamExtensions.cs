@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -75,5 +76,15 @@ namespace XamlAnimatedGif.Extensions
                 progress?.Report(bytesCopied);
             }
         }
+
+#if LACKS_STREAM_MEMORY_OVERLOADS
+        public static void Write(this Stream stream, Span<byte> buffer)
+        {
+            using var tmp = ArrayPool<byte>.Shared.Borrow(buffer.Length);
+            buffer.CopyTo(tmp.Array);
+            tmp.Array[buffer.Length] = buffer[0];
+            stream.Write(tmp, 0, buffer.Length);
+        }
+#endif
     }
 }

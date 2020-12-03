@@ -12,11 +12,14 @@ using System.Runtime.InteropServices;
 using XamlAnimatedGif.Decoding;
 using XamlAnimatedGif.Decompression;
 using XamlAnimatedGif.Extensions;
+using System.Buffers;
 
 namespace XamlAnimatedGif
 {
     public abstract class Animator : DependencyObject, IDisposable
     {
+        private static readonly ArrayPool<byte> BufferPool = ArrayPool<byte>.Shared;
+
         private readonly Stream _sourceStream;
         private readonly Uri _sourceUri;
         private readonly bool _isSourceStreamOwner;
@@ -25,7 +28,8 @@ namespace XamlAnimatedGif
         private readonly WriteableBitmap _bitmap;
         private readonly int _stride;
         private readonly byte[] _previousBackBuffer;
-        private readonly byte[] _indexStreamBuffer;
+        private readonly byte[] _compressedFrameBuffer;
+        private readonly MemoryStream _indexStream;
         private readonly TimingManager _timingManager;
 
         #region Constructor and factory methods
@@ -40,8 +44,12 @@ namespace XamlAnimatedGif
             _bitmap = CreateBitmap(metadata);
             var desc = metadata.Header.LogicalScreenDescriptor;
             _stride = 4 * ((desc.Width * 32 + 31) / 32);
-            _previousBackBuffer = new byte[desc.Height * _stride];
-            _indexStreamBuffer = CreateIndexStreamBuffer(metadata, _sourceStream);
+            _previousBackBuffer = BufferPool.Rent(desc.Height * _stride);
+            int largestCompressedFrameSize = (int)GetLargestCompressedFrameSize(metadata, sourceStream.Length);
+            _compressedFrameBuffer = BufferPool.Rent(largestCompressedFrameSize);
+            // We don't know how much size will be necessary for the uncompressed index stream.
+            // Start at largestCompressedFrameSize * 2, will resize if necessary.
+            _indexStream = new MemoryStream(largestCompressedFrameSize * 2);
             _timingManager = CreateTimingManager(metadata, repeatBehavior);
         }
 
@@ -267,12 +275,9 @@ namespace XamlAnimatedGif
             return palettes;
         }
 
-        private static byte[] CreateIndexStreamBuffer(GifDataStream metadata, Stream stream)
+        private static long GetLargestCompressedFrameSize(GifDataStream metadata, long totalStreamLength)
         {
-            // Find the size of the largest frame pixel data
-            // (ignoring the fact that we include the next frame's header)
-
-            long lastSize = stream.Length - metadata.Frames.Last().ImageData.CompressedDataStartOffset;
+            long lastSize = totalStreamLength - metadata.Frames.Last().ImageData.CompressedDataStartOffset;
             long maxSize = lastSize;
             if (metadata.Frames.Count > 1)
             {
@@ -280,8 +285,8 @@ namespace XamlAnimatedGif
                     (f1, f2) => f2.ImageData.CompressedDataStartOffset - f1.ImageData.CompressedDataStartOffset);
                 maxSize = Math.Max(sizes.Max(), lastSize);
             }
-            // Need 4 extra bytes so that BitReader doesn't need to check the size for every read
-            return new byte[maxSize + 4];
+
+            return maxSize;
         }
 
         private int _previousFrameIndex;
@@ -295,7 +300,7 @@ namespace XamlAnimatedGif
             var frame = _metadata.Frames[frameIndex];
             var desc = frame.Descriptor;
             var rect = GetFixedUpFrameRect(desc);
-            using var indexStream = await GetIndexStreamAsync(frame, cancellationToken);
+            await LoadIndexStreamAsync(frame, cancellationToken);
             using (_bitmap.LockInScope())
             {
                 if (frameIndex < _previousFrameIndex)
@@ -304,8 +309,8 @@ namespace XamlAnimatedGif
                     DisposePreviousFrame(frame);
 
                 int bufferLength = 4 * rect.Width;
-                byte[] indexBuffer = new byte[desc.Width];
-                byte[] lineBuffer = new byte[bufferLength];
+                using var indexBuffer = BufferPool.Borrow(desc.Width);
+                using var lineBuffer = BufferPool.Borrow(bufferLength);
 
                 var palette = _palettes[frameIndex];
                 int transparencyIndex = palette.TransparencyIndex ?? -1;
@@ -316,7 +321,7 @@ namespace XamlAnimatedGif
 
                 foreach (int y in rows)
                 {
-                    indexStream.ReadAll(indexBuffer, 0, desc.Width);
+                    _indexStream.ReadAll(indexBuffer, 0, desc.Width);
 
                     int offset = (desc.Top + y) * _stride + desc.Left * 4;
 
@@ -327,7 +332,7 @@ namespace XamlAnimatedGif
 
                     for (int x = 0; x < rect.Width; x++)
                     {
-                        byte index = indexBuffer[x];
+                        byte index = indexBuffer.Array[x];
                         int i = 4 * x;
                         if (index != transparencyIndex)
                         {
@@ -348,23 +353,24 @@ namespace XamlAnimatedGif
             return Enumerable.Range(0, height);
         }
 
+        
+         // 4 passes:
+         // Pass 1: rows 0, 8, 16, 24...
+         // Pass 2: rows 4, 12, 20, 28...
+         // Pass 3: rows 2, 6, 10, 14...
+         // Pass 4: rows 1, 3, 5, 7... 
+        private static readonly (int Start, int Step)[] InterlacedPasses = new[]
+        {
+            (0, 8),
+            (4, 8),
+            (2, 4),
+            (1, 2)
+        };
+
         private static IEnumerable<int> InterlacedRows(int height)
         {
-            /*
-             * 4 passes:
-             * Pass 1: rows 0, 8, 16, 24...
-             * Pass 2: rows 4, 12, 20, 28...
-             * Pass 3: rows 2, 6, 10, 14...
-             * Pass 4: rows 1, 3, 5, 7...
-             * */
-            var passes = new[]
-            {
-                new { Start = 0, Step = 8 },
-                new { Start = 4, Step = 8 },
-                new { Start = 2, Step = 4 },
-                new { Start = 1, Step = 2 }
-            };
-            foreach (var pass in passes)
+
+            foreach (var pass in InterlacedPasses)
             {
                 int y = pass.Start;
                 while (y < height)
@@ -437,7 +443,7 @@ namespace XamlAnimatedGif
         private void ClearArea(Int32Rect rect)
         {
             int bufferLength = 4 * rect.Width;
-            byte[] lineBuffer = new byte[bufferLength];
+            using var lineBuffer = BufferPool.Borrow(bufferLength);
             for (int y = 0; y < rect.Height; y++)
             {
                 int offset = (rect.Y + y) * _stride + 4 * rect.X;
@@ -447,17 +453,15 @@ namespace XamlAnimatedGif
             _bitmap.AddDirtyRect(new Int32Rect(rect.X, rect.Y, rect.Width, rect.Height));
         }
 
-        private async Task<Stream> GetIndexStreamAsync(GifFrame frame, CancellationToken cancellationToken)
+        private async Task LoadIndexStreamAsync(GifFrame frame, CancellationToken cancellationToken)
         {
             var data = frame.ImageData;
             cancellationToken.ThrowIfCancellationRequested();
             _sourceStream.Seek(data.CompressedDataStartOffset, SeekOrigin.Begin);
-            using (var ms = new MemoryStream(_indexStreamBuffer))
-            {
-                await GifHelpers.CopyDataBlocksToStreamAsync(_sourceStream, ms, cancellationToken).ConfigureAwait(false);
-            }
-            var lzwStream = new LzwDecompressStream(_indexStreamBuffer, data.LzwMinimumCodeSize);
-            return lzwStream;
+            int length = await GifHelpers.ReadDataBlocksAsync(_sourceStream, _compressedFrameBuffer, cancellationToken);
+            _indexStream.SetLength(0);
+            LzwDecompressor.Decompress(_compressedFrameBuffer.AsMemory(0, length), data.LzwMinimumCodeSize, _indexStream);
+            _indexStream.Position = 0;
         }
 
         internal BitmapSource Bitmap => _bitmap;
@@ -526,6 +530,9 @@ namespace XamlAnimatedGif
                         /* ignored */
                     }
                 }
+                BufferPool.Return(_compressedFrameBuffer);
+                BufferPool.Return(_previousBackBuffer);
+                _indexStream.Dispose();
                 _disposed = true;
             }
         }
