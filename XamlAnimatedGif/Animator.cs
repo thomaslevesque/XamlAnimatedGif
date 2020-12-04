@@ -244,26 +244,16 @@ namespace XamlAnimatedGif
         private static Dictionary<int, GifPalette> CreatePalettes(GifDataStream metadata)
         {
             var palettes = new Dictionary<int, GifPalette>();
-            Color[] globalColorTable = null;
-            if (metadata.Header.LogicalScreenDescriptor.HasGlobalColorTable)
-            {
-                globalColorTable =
-                    metadata.GlobalColorTable
-                        .Select(gc => Color.FromArgb(0xFF, gc.R, gc.G, gc.B))
-                        .ToArray();
-            }
+            GifColor[] globalColorTable = metadata.Header.LogicalScreenDescriptor.HasGlobalColorTable
+                ? metadata.GlobalColorTable
+                : null;
 
             for (int i = 0; i < metadata.Frames.Count; i++)
             {
                 var frame = metadata.Frames[i];
-                var colorTable = globalColorTable;
-                if (frame.Descriptor.HasLocalColorTable)
-                {
-                    colorTable =
-                        frame.LocalColorTable
-                            .Select(gc => Color.FromArgb(0xFF, gc.R, gc.G, gc.B))
-                            .ToArray();
-                }
+                var colorTable = frame.Descriptor.HasLocalColorTable
+                    ? frame.LocalColorTable
+                    : globalColorTable;
 
                 int? transparencyIndex = null;
                 var gce = frame.GraphicControl;
@@ -339,7 +329,7 @@ namespace XamlAnimatedGif
                         int i = 4 * x;
                         if (index != transparencyIndex)
                         {
-                            WriteColor(lineBuffer, palette[index], i);
+                            WriteColor(lineBuffer, ref palette[index], i);
                         }
                     }
 
@@ -395,12 +385,12 @@ namespace XamlAnimatedGif
             Marshal.Copy(bitmap.BackBuffer + offset, buffer, 0, length);
         }
 
-        private static void WriteColor(byte[] lineBuffer, Color color, int startIndex)
+        private static void WriteColor(byte[] lineBuffer, ref GifColor color, int startIndex)
         {
             lineBuffer[startIndex] = color.B;
             lineBuffer[startIndex + 1] = color.G;
             lineBuffer[startIndex + 2] = color.R;
-            lineBuffer[startIndex + 3] = color.A;
+            lineBuffer[startIndex + 3] = 0xFF;
         }
 
         private void DisposePreviousFrame(GifFrame currentFrame)
@@ -551,9 +541,9 @@ namespace XamlAnimatedGif
 
         class GifPalette
         {
-            private readonly Color[] _colors;
+            private readonly GifColor[] _colors;
 
-            public GifPalette(int? transparencyIndex, Color[] colors)
+            public GifPalette(int? transparencyIndex, GifColor[] colors)
             {
                 TransparencyIndex = transparencyIndex;
                 _colors = colors;
@@ -561,7 +551,21 @@ namespace XamlAnimatedGif
 
             public int? TransparencyIndex { get; }
 
-            public Color this[int i] => _colors[i];
+            public ref GifColor this[int i] => ref _colors[i];
+        }
+
+        struct RGBColor
+        {
+            public RGBColor(int r, int g, int b)
+            {
+                R = r;
+                G = g;
+                B = b;
+            }
+
+            public int R { get; }
+            public int G { get; }
+            public int B { get; }
         }
 
         internal async Task ShowFirstFrameAsync()
