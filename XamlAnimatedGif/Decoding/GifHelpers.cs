@@ -1,65 +1,10 @@
 using System;
-using System.IO;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-using XamlAnimatedGif.Extensions;
 
 namespace XamlAnimatedGif.Decoding
 {
     internal static class GifHelpers
     {
-        public static async Task<string> ReadStringAsync(Stream stream, int length)
-        {
-            byte[] bytes = new byte[length];
-            await stream.ReadAllAsync(bytes, 0, length).ConfigureAwait(false);
-            return GetString(bytes);
-        }
-
-        public static async Task ConsumeDataBlocksAsync(Stream sourceStream, CancellationToken cancellationToken = default)
-        {
-            await CopyDataBlocksToStreamAsync(sourceStream, Stream.Null, cancellationToken);
-        }
-
-        public static async Task<byte[]> ReadDataBlocksAsync(Stream stream, CancellationToken cancellationToken = default)
-        {
-            using var ms = new MemoryStream();
-            await CopyDataBlocksToStreamAsync(stream, ms, cancellationToken);
-            return ms.ToArray();
-        }
-
-        public static async Task CopyDataBlocksToStreamAsync(Stream sourceStream, Stream targetStream, CancellationToken cancellationToken = default)
-        {
-            int len;
-            // the length is on 1 byte, so each data sub-block can't be more than 255 bytes long
-            byte[] buffer = new byte[255];
-            while ((len = await sourceStream.ReadByteAsync(cancellationToken)) > 0)
-            {
-                await sourceStream.ReadAllAsync(buffer, 0, len, cancellationToken).ConfigureAwait(false);
-#if LACKS_STREAM_MEMORY_OVERLOADS
-                await targetStream.WriteAsync(buffer, 0, len, cancellationToken);
-#else
-                await targetStream.WriteAsync(buffer.AsMemory(0, len), cancellationToken);
-#endif
-            }
-        }
-
-        public static async Task<GifColor[]> ReadColorTableAsync(Stream stream, int size)
-        {
-            int length = 3 * size;
-            byte[] bytes = new byte[length];
-            await stream.ReadAllAsync(bytes, 0, length).ConfigureAwait(false);
-            GifColor[] colorTable = new GifColor[size];
-            for (int i = 0; i < size; i++)
-            {
-                byte r = bytes[3 * i];
-                byte g = bytes[3 * i + 1];
-                byte b = bytes[3 * i + 2];
-                colorTable[i] = new GifColor(r, g, b);
-            }
-            return colorTable;
-        }
-
         public static bool IsNetscapeExtension(GifApplicationExtension ext)
         {
             return ext.ApplicationIdentifier == "NETSCAPE"
@@ -108,7 +53,7 @@ namespace XamlAnimatedGif.Decoding
 
         public static string GetString(byte[] bytes, int index, int count)
         {
-            return Encoding.UTF8.GetString(bytes, index, count);
+            return Encoding.ASCII.GetString(bytes, index, count);
         }
     }
 }

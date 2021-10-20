@@ -1,9 +1,5 @@
-using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Threading.Tasks;
-using XamlAnimatedGif.Extensions;
 
 namespace XamlAnimatedGif.Decoding
 {
@@ -23,47 +19,41 @@ namespace XamlAnimatedGif.Decoding
         public int BackgroundColorIndex { get; private set; }
         public string Text { get; private set; }
 
-        public IList<GifExtension> Extensions { get; private set; }
+        public IReadOnlyList<GifExtension> Extensions { get; private set; }
 
         private GifPlainTextExtension()
         {
         }
 
-        internal override GifBlockKind Kind
-        {
-            get { return GifBlockKind.GraphicRendering; }
-        }
+        internal override GifBlockKind Kind => GifBlockKind.GraphicRendering;
 
-        internal new static async Task<GifPlainTextExtension> ReadAsync(Stream stream, IEnumerable<GifExtension> controlExtensions)
+        internal new static GifPlainTextExtension Read(GifBufferReader reader, IEnumerable<GifExtension> controlExtensions)
         {
             var plainText = new GifPlainTextExtension();
-            await plainText.ReadInternalAsync(stream, controlExtensions).ConfigureAwait(false);
+            plainText.ReadInternal(reader, controlExtensions);
             return plainText;
         }
 
-        private async Task ReadInternalAsync(Stream stream, IEnumerable<GifExtension> controlExtensions)
+        private void ReadInternal(GifBufferReader reader, IEnumerable<GifExtension> controlExtensions)
         {
             // Note: at this point, the label (0x01) has already been read
 
-            byte[] bytes = new byte[13];
-            await stream.ReadAllAsync(bytes, 0, bytes.Length).ConfigureAwait(false);
-
-            BlockSize = bytes[0];
+            BlockSize = reader.ReadByte();
             if (BlockSize != 12)
                 throw GifHelpers.InvalidBlockSizeException("Plain Text Extension", 12, BlockSize);
 
-            Left = BitConverter.ToUInt16(bytes, 1);
-            Top = BitConverter.ToUInt16(bytes, 3);
-            Width = BitConverter.ToUInt16(bytes, 5);
-            Height = BitConverter.ToUInt16(bytes, 7);
-            CellWidth = bytes[9];
-            CellHeight = bytes[10];
-            ForegroundColorIndex = bytes[11];
-            BackgroundColorIndex = bytes[12];
+            Left = reader.ReadUInt16();
+            Top = reader.ReadUInt16();
+            Width = reader.ReadUInt16();
+            Height = reader.ReadUInt16();
+            CellWidth = reader.ReadByte();
+            CellHeight = reader.ReadByte();
+            ForegroundColorIndex = reader.ReadByte();
+            BackgroundColorIndex = reader.ReadByte();
 
-            var dataBytes = await GifHelpers.ReadDataBlocksAsync(stream).ConfigureAwait(false);
-            Text = GifHelpers.GetString(dataBytes);
-            Extensions = controlExtensions.ToList().AsReadOnly();
+            Text = reader.ReadStringFromDataBlocks();
+
+            Extensions = controlExtensions.ToList();
         }
     }
 }

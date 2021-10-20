@@ -1,6 +1,3 @@
-using System.IO;
-using System.Threading.Tasks;
-
 namespace XamlAnimatedGif.Decoding
 {
     internal class GifCommentExtension : GifExtension
@@ -13,25 +10,20 @@ namespace XamlAnimatedGif.Decoding
         {
         }
 
-        internal override GifBlockKind Kind
-        {
-            get { return GifBlockKind.SpecialPurpose; }
-        }
+        internal override GifBlockKind Kind => GifBlockKind.SpecialPurpose;
 
-        internal static async Task<GifCommentExtension> ReadAsync(Stream stream)
+        internal static GifCommentExtension Read(GifBufferReader reader)
         {
             var comment = new GifCommentExtension();
-            await comment.ReadInternalAsync(stream).ConfigureAwait(false);
+            comment.ReadInternal(reader);
             return comment;
         }
 
-        private async Task ReadInternalAsync(Stream stream)
+        private void ReadInternal(GifBufferReader reader)
         {
             // Note: at this point, the label (0xFE) has already been read
 
-            var bytes = await GifHelpers.ReadDataBlocksAsync(stream).ConfigureAwait(false);
-            if (bytes != null)
-                Text = GifHelpers.GetString(bytes);
+            Text = reader.ReadStringFromDataBlocks();
         }
     }
 }

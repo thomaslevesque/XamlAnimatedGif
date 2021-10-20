@@ -1,29 +1,30 @@
-using System.IO;
-using System.Threading.Tasks;
-
 namespace XamlAnimatedGif.Decoding
 {
     internal class GifImageData
     {
         public byte LzwMinimumCodeSize { get; set; }
         public long CompressedDataStartOffset { get; set; }
+        public int Length { get; set; }
 
         private GifImageData()
         {
         }
 
-        internal static async Task<GifImageData> ReadAsync(Stream stream)
+        internal static GifImageData Read(GifBufferReader reader)
         {
             var imgData = new GifImageData();
-            await imgData.ReadInternalAsync(stream).ConfigureAwait(false);
+            imgData.ReadInternal(reader);
             return imgData;
         }
 
-        private async Task ReadInternalAsync(Stream stream)
+        private void ReadInternal(GifBufferReader reader)
         {
-            LzwMinimumCodeSize = (byte)stream.ReadByte();
-            CompressedDataStartOffset = stream.Position;
-            await GifHelpers.ConsumeDataBlocksAsync(stream).ConfigureAwait(false);
+            long start = reader.Position;
+            LzwMinimumCodeSize = reader.ReadByte();
+            CompressedDataStartOffset = reader.Position;
+            reader.SkipDataBlocks();
+
+            Length = (int)(reader.Position - start);
         }
     }
 }

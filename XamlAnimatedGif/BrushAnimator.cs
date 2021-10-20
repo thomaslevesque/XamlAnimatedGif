@@ -9,7 +9,7 @@ namespace XamlAnimatedGif
 {
     public class BrushAnimator : Animator
     {
-        private BrushAnimator(Stream sourceStream, Uri sourceUri, GifDataStream metadata, RepeatBehavior repeatBehavior) : base(sourceStream, sourceUri, metadata, repeatBehavior)
+        private BrushAnimator(byte[] sourceBuffer, Uri sourceUri, GifDataStream metadata, RepeatBehavior repeatBehavior) : base(sourceBuffer, sourceUri, metadata, repeatBehavior)
         {
             Brush = new ImageBrush {ImageSource = Bitmap};
             RepeatBehavior = _repeatBehavior;
@@ -24,7 +24,7 @@ namespace XamlAnimatedGif
         private RepeatBehavior _repeatBehavior;
         public RepeatBehavior RepeatBehavior
         {
-            get { return _repeatBehavior; }
+            get => _repeatBehavior;
             set
             {
                 _repeatBehavior = value;
@@ -40,11 +40,11 @@ namespace XamlAnimatedGif
                 (stream, metadata) => new BrushAnimator(stream, sourceUri, metadata, repeatBehavior));
         }
 
-        public static Task<BrushAnimator> CreateAsync(Stream sourceStream, RepeatBehavior repeatBehavior)
+        public static async Task<BrushAnimator> CreateAsync(Stream sourceStream, RepeatBehavior repeatBehavior)
         {
-            return CreateAsyncCore(
+            return await CreateAsyncCore(
                 sourceStream,
-                metadata => new BrushAnimator(sourceStream, null, metadata, repeatBehavior));
+                (buffer, metadata) => new BrushAnimator(buffer, null, metadata, repeatBehavior));
         }
     }
 }

@@ -1,8 +1,3 @@
-using System;
-using System.IO;
-using System.Threading.Tasks;
-using XamlAnimatedGif.Extensions;
-
 namespace XamlAnimatedGif.Decoding
 {
     // label 0xF9
@@ -22,33 +17,32 @@ namespace XamlAnimatedGif.Decoding
 
         }
 
-        internal override GifBlockKind Kind
-        {
-            get { return GifBlockKind.Control; }
-        }
+        internal override GifBlockKind Kind => GifBlockKind.Control;
 
-        internal static async Task<GifGraphicControlExtension> ReadAsync(Stream stream)
+        internal static GifGraphicControlExtension Read(GifBufferReader reader)
         {
             var ext = new GifGraphicControlExtension();
-            await ext.ReadInternalAsync(stream).ConfigureAwait(false);
+            ext.ReadInternal(reader);
             return ext;
         }
 
-        private async Task ReadInternalAsync(Stream stream)
+        private void ReadInternal(GifBufferReader reader)
         {
-            // Note: at this point, the label (0xF9) has already been read
-
-            byte[] bytes = new byte[6];
-            await stream.ReadAllAsync(bytes, 0, bytes.Length).ConfigureAwait(false);
-            BlockSize = bytes[0]; // should always be 4
+            BlockSize = reader.ReadByte();
             if (BlockSize != 4)
                 throw GifHelpers.InvalidBlockSizeException("Graphic Control Extension", 4, BlockSize);
-            byte packedFields = bytes[1];
+            var packedFields = reader.ReadByte();
+            ReadPackedFields(packedFields);
+            Delay = reader.ReadUInt16() * 10; // milliseconds
+            TransparencyIndex = reader.ReadByte();
+            reader.ReadByte(); // Read block terminator
+        }
+
+        private void ReadPackedFields(byte packedFields)
+        {
             DisposalMethod = (GifFrameDisposalMethod) ((packedFields & 0x1C) >> 2);
             UserInput = (packedFields & 0x02) != 0;
             HasTransparency = (packedFields & 0x01) != 0;
-            Delay = BitConverter.ToUInt16(bytes, 2) * 10; // milliseconds
-            TransparencyIndex = bytes[4];
         }
     }
 }

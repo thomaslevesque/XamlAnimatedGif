@@ -1,8 +1,3 @@
-using System;
-using System.IO;
-using System.Threading.Tasks;
-using XamlAnimatedGif.Extensions;
-
 namespace XamlAnimatedGif.Decoding
 {
     internal class GifImageDescriptor : IGifRect
@@ -20,22 +15,26 @@ namespace XamlAnimatedGif.Decoding
         {
         }
 
-        internal static async Task<GifImageDescriptor> ReadAsync(Stream stream)
+        internal static GifImageDescriptor Read(GifBufferReader reader)
         {
             var descriptor = new GifImageDescriptor();
-            await descriptor.ReadInternalAsync(stream).ConfigureAwait(false);
+            descriptor.ReadInternal(reader);
             return descriptor;
         }
 
-        private async Task ReadInternalAsync(Stream stream)
+        private void ReadInternal(GifBufferReader reader)
         {
-            byte[] bytes = new byte[9];
-            await stream.ReadAllAsync(bytes, 0, bytes.Length).ConfigureAwait(false);
-            Left = BitConverter.ToUInt16(bytes, 0);
-            Top = BitConverter.ToUInt16(bytes, 2);
-            Width = BitConverter.ToUInt16(bytes, 4);
-            Height = BitConverter.ToUInt16(bytes, 6);
-            byte packedFields = bytes[8];
+            Left = reader.ReadUInt16();
+            Top = reader.ReadUInt16();
+            Width = reader.ReadUInt16();
+            Height = reader.ReadUInt16();
+
+            byte packedFields = reader.ReadByte();
+            ReadPackedFields(packedFields);
+        }
+
+        private void ReadPackedFields(byte packedFields)
+        {
             HasLocalColorTable = (packedFields & 0x80) != 0;
             Interlace = (packedFields & 0x40) != 0;
             IsLocalColorTableSorted = (packedFields & 0x20) != 0;

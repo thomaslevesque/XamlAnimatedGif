@@ -13,23 +13,48 @@ namespace XamlAnimatedGif
 {
     internal class UriLoader
     {
-        public static Task<Stream> GetStreamFromUriAsync(Uri uri, IProgress<int> progress)
+        public static Task<byte[]> GetDataFromUriAsync(Uri uri, IProgress<int> progress)
         {
             if (uri.IsAbsoluteUri && (uri.Scheme == "http" || uri.Scheme == "https"))
-                return GetNetworkStreamAsync(uri, progress);
-            return GetStreamFromUriCoreAsync(uri);
+                return GetDataFromNetworkAsync(uri, progress);
+
+            return GetDataFromUriCoreAsync(uri);
         }
 
-        private static async Task<Stream> GetNetworkStreamAsync(Uri uri, IProgress<int> progress)
+        private static async Task<byte[]> GetDataFromNetworkAsync(Uri uri, IProgress<int> progress)
         {
             string cacheFileName = GetCacheFileName(uri);
-            var cacheStream = await OpenTempFileStreamAsync(cacheFileName);
+            var cacheStream = OpenTempFileStream(cacheFileName);
             if (cacheStream == null)
             {
                 await DownloadToCacheFileAsync(uri, cacheFileName, progress);
+                cacheStream = OpenTempFileStream(cacheFileName);
             }
             progress.Report(100);
-            return await OpenTempFileStreamAsync(cacheFileName);
+
+            return await cacheStream.ReadAllAsync(true);
+        }
+        
+        private static async Task<byte[]> GetDataFromUriCoreAsync(Uri uri)
+        {
+            if (uri.Scheme == PackUriHelper.UriSchemePack)
+            {
+                var sri = uri.Authority == "siteoforigin:,,,"
+                    ? Application.GetRemoteStream(uri)
+                    : Application.GetResourceStream(uri);
+
+                if (sri != null)
+                    return await sri.Stream.ReadAllAsync(true);
+
+                throw new FileNotFoundException("Cannot find file with the specified URI");
+            }
+
+            if (uri.Scheme == Uri.UriSchemeFile)
+            {
+                return await File.OpenRead(uri.LocalPath).ReadAllAsync(true);
+            }
+
+            throw new NotSupportedException("Only pack:, file:, http: and https: URIs are supported");
         }
 
         private static async Task DownloadToCacheFileAsync(Uri uri, string fileName, IProgress<int> progress)
@@ -64,29 +89,7 @@ namespace XamlAnimatedGif
             }
         }
 
-        private static Task<Stream> GetStreamFromUriCoreAsync(Uri uri)
-        {
-            if (uri.Scheme == PackUriHelper.UriSchemePack)
-            {
-                var sri = uri.Authority == "siteoforigin:,,,"
-                    ? Application.GetRemoteStream(uri)
-                    : Application.GetResourceStream(uri);
-
-                if (sri != null)
-                    return Task.FromResult(sri.Stream);
-
-                throw new FileNotFoundException("Cannot find file with the specified URI");
-            }
-
-            if (uri.Scheme == Uri.UriSchemeFile)
-            {
-                return Task.FromResult<Stream>(File.OpenRead(uri.LocalPath));
-            }
-
-            throw new NotSupportedException("Only pack:, file:, http: and https: URIs are supported");
-        }
-
-        private static Task<Stream> OpenTempFileStreamAsync(string fileName)
+        private static Stream OpenTempFileStream(string fileName)
         {
             string path = Path.Combine(Path.GetTempPath(), fileName);
             Stream stream = null;
@@ -97,7 +100,8 @@ namespace XamlAnimatedGif
             catch (FileNotFoundException)
             {
             }
-            return Task.FromResult(stream);
+
+            return stream;
         }
 
         private static Task<Stream> CreateTempFileStreamAsync(string fileName)

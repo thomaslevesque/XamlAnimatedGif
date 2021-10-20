@@ -2,7 +2,6 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using XamlAnimatedGif.Extensions;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
@@ -384,7 +383,7 @@ namespace XamlAnimatedGif
                 var stream = GetSourceStream(image);
                 if (stream != null)
                 {
-                    InitAnimationAsync(image, stream.AsBuffered(), GetRepeatBehavior(image), seqNum);
+                    InitAnimationAsync(image, stream, GetRepeatBehavior(image), seqNum);
                     return;
                 }
 
@@ -463,7 +462,7 @@ namespace XamlAnimatedGif
 
                 SetAnimatorCore(image, animator);
                 OnLoaded(image);
-                await StartAsync(image, animator);
+                Start(image, animator);
             }
             catch (InvalidSignatureException)
             {
@@ -493,7 +492,7 @@ namespace XamlAnimatedGif
 
                 SetAnimatorCore(image, animator);
                 OnLoaded(image);
-                await StartAsync(image, animator);
+                Start(image, animator);
             }
             catch (InvalidSignatureException)
             {
@@ -515,12 +514,12 @@ namespace XamlAnimatedGif
             image.Source = animator.Bitmap;
         }
 
-        private static async Task StartAsync(Image image, Animator animator)
+        private static void Start(Image image, Animator animator)
         {
             if (GetAutoStart(image))
                 animator.Play();
             else
-                await animator.ShowFirstFrameAsync();
+                animator.ShowFirstFrame();
         }
 
         private static void ClearAnimatorCore(Image image)
@@ -547,8 +546,8 @@ namespace XamlAnimatedGif
             try
             {
                 var progress = new Progress<int>(percentage => OnDownloadProgress(image, percentage));
-                var stream = await UriLoader.GetStreamFromUriAsync(sourceUri, progress);
-                SetStaticImageCore(image, stream);
+                var data = await UriLoader.GetDataFromUriAsync(sourceUri, progress);
+                SetStaticImageCore(image, data);
             }
             catch (Exception ex)
             {
@@ -570,12 +569,18 @@ namespace XamlAnimatedGif
 
         private static void SetStaticImageCore(Image image, Stream stream)
         {
-            stream.Seek(0, SeekOrigin.Begin);
             var bmp = new BitmapImage();
             bmp.BeginInit();
+            bmp.CacheOption = BitmapCacheOption.OnLoad;
             bmp.StreamSource = stream;
             bmp.EndInit();
             image.Source = bmp;
+        }
+        
+        private static void SetStaticImageCore(Image image, byte[] data)
+        {
+            using var ms = new MemoryStream(data);
+            SetStaticImage(image, ms);
         }
     }
 }

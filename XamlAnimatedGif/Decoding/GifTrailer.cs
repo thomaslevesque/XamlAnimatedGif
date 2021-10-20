@@ -1,5 +1,3 @@
-using System.Threading.Tasks;
-
 namespace XamlAnimatedGif.Decoding
 {
     internal class GifTrailer : GifBlock
@@ -10,14 +8,8 @@ namespace XamlAnimatedGif.Decoding
         {
         }
 
-        internal override GifBlockKind Kind
-        {
-            get { return GifBlockKind.Other; }
-        }
+        internal override GifBlockKind Kind => GifBlockKind.Other;
 
-        internal static Task<GifTrailer> ReadAsync()
-        {
-            return Task.FromResult(new GifTrailer());
-        }
+        internal static GifTrailer Read() => new GifTrailer();
     }
 }

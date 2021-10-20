@@ -1,7 +1,5 @@
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Threading.Tasks;
 
 namespace XamlAnimatedGif.Decoding
 {
@@ -9,51 +7,52 @@ namespace XamlAnimatedGif.Decoding
     {
         public GifHeader Header { get; private set; }
         public GifColor[] GlobalColorTable { get; set; }
-        public IList<GifFrame> Frames { get; set; }
-        public IList<GifExtension> Extensions { get; set; }
+        public IReadOnlyList<GifFrame> Frames { get; set; }
+        public IReadOnlyList<GifExtension> Extensions { get; set; }
         public ushort RepeatCount { get; set; }
 
         private GifDataStream()
         {
         }
 
-        internal static async Task<GifDataStream> ReadAsync(Stream stream)
+        internal static GifDataStream Read(GifBufferReader reader)
         {
             var file = new GifDataStream();
-            await file.ReadInternalAsync(stream).ConfigureAwait(false);
+            file.ReadInternal(reader);
             return file;
         }
 
-        private async Task ReadInternalAsync(Stream stream)
+        private void ReadInternal(GifBufferReader reader)
         {
-            Header = await GifHeader.ReadAsync(stream).ConfigureAwait(false);
+            Header = GifHeader.Read(reader);
 
             if (Header.LogicalScreenDescriptor.HasGlobalColorTable)
             {
-                GlobalColorTable = await GifHelpers.ReadColorTableAsync(stream, Header.LogicalScreenDescriptor.GlobalColorTableSize).ConfigureAwait(false);
+                GlobalColorTable = reader.ReadColorTable(Header.LogicalScreenDescriptor.GlobalColorTableSize);
             }
-            await ReadFramesAsync(stream).ConfigureAwait(false);
+
+            ReadFrames(reader);
 
             var netscapeExtension =
-                            Extensions
-                                .OfType<GifApplicationExtension>()
-                                .FirstOrDefault(GifHelpers.IsNetscapeExtension);
+                Extensions
+                    .OfType<GifApplicationExtension>()
+                    .FirstOrDefault(GifHelpers.IsNetscapeExtension);
 
             RepeatCount = netscapeExtension != null
                 ? GifHelpers.GetRepeatCount(netscapeExtension)
                 : (ushort)1;
         }
 
-        private async Task ReadFramesAsync(Stream stream)
+        private void ReadFrames(GifBufferReader reader)
         {
-            List<GifFrame> frames = new List<GifFrame>();
-            List<GifExtension> controlExtensions = new List<GifExtension>();
-            List<GifExtension> specialExtensions = new List<GifExtension>();
+            var frames = new List<GifFrame>();
+            var controlExtensions = new List<GifExtension>();
+            var specialExtensions = new List<GifExtension>();
             while (true)
             {
                 try
                 {
-                    var block = await GifBlock.ReadAsync(stream, controlExtensions).ConfigureAwait(false);
+                    var block = GifBlock.Read(reader, controlExtensions);
 
                     if (block.Kind == GifBlockKind.GraphicRendering)
                         controlExtensions = new List<GifExtension>();
@@ -73,7 +72,7 @@ namespace XamlAnimatedGif.Decoding
                                 specialExtensions.Add(extension);
                                 break;
 
-                                // Just discard plain text extensions for now, since we have no use for it
+                            // Just discard plain text extensions for now, since we have no use for it
                         }
                     }
                     else if (block is GifTrailer)
@@ -91,8 +90,8 @@ namespace XamlAnimatedGif.Decoding
                 }
             }
 
-            this.Frames = frames.AsReadOnly();
-            this.Extensions = specialExtensions.AsReadOnly();
+            Frames = frames;
+            Extensions = specialExtensions;
         }
     }
 }

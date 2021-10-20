@@ -48,13 +48,6 @@ namespace XamlAnimatedGif.Extensions
             return buffer[0];
         }
 
-        public static Stream AsBuffered(this Stream stream)
-        {
-            if (stream is BufferedStream bs)
-                return bs;
-            return new BufferedStream(stream);
-        }
-
         public static async Task CopyToAsync(this Stream source, Stream destination, IProgress<long> progress, int bufferSize = 81920, CancellationToken cancellationToken = default)
         {
             byte[] buffer = new byte[bufferSize];
@@ -74,6 +67,15 @@ namespace XamlAnimatedGif.Extensions
                 bytesCopied += bytesRead;
                 progress?.Report(bytesCopied);
             }
+        }
+
+        public static async Task<byte[]> ReadAllAsync(this Stream stream, bool dispose, CancellationToken cancellationToken = default)
+        {
+            var buffer = new byte[stream.Length];
+            await stream.ReadAllAsync(buffer, 0, buffer.Length, cancellationToken);
+            if (dispose)
+                stream.Dispose();
+            return buffer;
         }
     }
 }

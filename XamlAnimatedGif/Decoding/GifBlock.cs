@@ -1,22 +1,17 @@
 using System.Collections.Generic;
-using System.IO;
-using System.Threading.Tasks;
-using XamlAnimatedGif.Extensions;
 
 namespace XamlAnimatedGif.Decoding
 {
     internal abstract class GifBlock
     {
-        internal static async Task<GifBlock> ReadAsync(Stream stream, IEnumerable<GifExtension> controlExtensions)
+        internal static GifBlock Read(GifBufferReader reader, IEnumerable<GifExtension> controlExtensions)
         {
-            int blockId = await stream.ReadByteAsync().ConfigureAwait(false);
-            if (blockId < 0)
-                throw new EndOfStreamException();
+            int blockId = reader.ReadByte();
             return blockId switch
             {
-                GifExtension.ExtensionIntroducer => await GifExtension.ReadAsync(stream, controlExtensions).ConfigureAwait(false),
-                GifFrame.ImageSeparator => await GifFrame.ReadAsync(stream, controlExtensions).ConfigureAwait(false),
-                GifTrailer.TrailerByte => await GifTrailer.ReadAsync().ConfigureAwait(false),
+                GifExtension.ExtensionIntroducer => GifExtension.Read(reader, controlExtensions),
+                GifFrame.ImageSeparator => GifFrame.Read(reader, controlExtensions),
+                GifTrailer.TrailerByte => GifTrailer.Read(),
                 _ => throw GifHelpers.UnknownBlockTypeException(blockId),
             };
         }

@@ -7,9 +7,9 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using Microsoft.Win32;
-using XamlAnimatedGif;
 using XamlAnimatedGif.Decoding;
 using XamlAnimatedGif.Decompression;
+using XamlAnimatedGif.Extensions;
 
 namespace XamlAnimatedGif.Demo
 {
@@ -64,18 +64,26 @@ namespace XamlAnimatedGif.Demo
 
         private static async Task DecompressAllFramesAsync(string path)
         {
-            using var fileStream = File.OpenRead(path);
-            var gif = await GifDataStream.ReadAsync(fileStream);
+            var data = await File.OpenRead(path).ReadAllAsync(true);
+            var reader = new GifBufferReader(data);
+            var gif = GifDataStream.Read(reader);
             for (int i = 0; i < gif.Frames.Count; i++)
             {
                 var frame = gif.Frames[i];
-                fileStream.Seek(frame.ImageData.CompressedDataStartOffset, SeekOrigin.Begin);
                 using var ms = new MemoryStream();
-                await GifHelpers.CopyDataBlocksToStreamAsync(fileStream, ms);
-                using var lzwStream = new LzwDecompressStream(ms.GetBuffer(), frame.ImageData.LzwMinimumCodeSize);
+                Decompress(data, frame.ImageData, ms);
                 using var indOutStream = File.OpenWrite($"{path}.{i}.ind");
-                await lzwStream.CopyToAsync(indOutStream);
+                ms.Seek(0, SeekOrigin.Begin);
+                await ms.CopyToAsync(indOutStream);
             }
+        }
+
+        private static void Decompress(byte[] buffer, GifImageData data, Stream destination)
+        {
+            var reader = new GifBufferReader(buffer);
+            reader.Position = (int)data.CompressedDataStartOffset;
+            var raw = reader.ReadDataBlocks(new byte[data.Length]);
+            Lzw.Decompress(raw, destination, data.LzwMinimumCodeSize);
         }
 
         private async void BtnTestBrush_OnClick(object sender, RoutedEventArgs e)

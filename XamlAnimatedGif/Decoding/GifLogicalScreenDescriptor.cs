@@ -1,8 +1,3 @@
-using System;
-using System.IO;
-using System.Threading.Tasks;
-using XamlAnimatedGif.Extensions;
-
 namespace XamlAnimatedGif.Decoding
 {
     internal class GifLogicalScreenDescriptor : IGifRect
@@ -16,40 +11,39 @@ namespace XamlAnimatedGif.Decoding
         public int BackgroundColorIndex { get; private set; }
         public double PixelAspectRatio { get; private set; }
 
-        internal static async Task<GifLogicalScreenDescriptor> ReadAsync(Stream stream)
+        public static GifLogicalScreenDescriptor Read(GifBufferReader reader)
         {
             var descriptor = new GifLogicalScreenDescriptor();
-            await descriptor.ReadInternalAsync(stream).ConfigureAwait(false);
+            descriptor.ReadInternal(reader);
             return descriptor;
         }
 
-        private async Task ReadInternalAsync(Stream stream)
+        private void ReadInternal(GifBufferReader reader)
         {
-            byte[] bytes = new byte[7];
-            await stream.ReadAllAsync(bytes, 0, bytes.Length).ConfigureAwait(false);
+            Width = reader.ReadUInt16();
+            Height = reader.ReadUInt16();
+            byte packedFields = reader.ReadByte();
+            ReadPackedFields(packedFields);
+            BackgroundColorIndex = reader.ReadByte();
+            var rawAspectRatio = reader.ReadByte();
+            PixelAspectRatio = GetPixelAspectRatio(rawAspectRatio);
+        }
 
-            Width = BitConverter.ToUInt16(bytes, 0);
-            Height = BitConverter.ToUInt16(bytes, 2);
-            byte packedFields = bytes[4];
+        private void ReadPackedFields(byte packedFields)
+        {
             HasGlobalColorTable = (packedFields & 0x80) != 0;
             ColorResolution = ((packedFields & 0x70) >> 4) + 1;
             IsGlobalColorTableSorted = (packedFields & 0x08) != 0;
             GlobalColorTableSize = 1 << ((packedFields & 0x07) + 1);
-            BackgroundColorIndex = bytes[5];
-            PixelAspectRatio =
-                bytes[6] == 0
-                    ? 0.0
-                    : (15 + bytes[6]) / 64.0;
         }
 
-        int IGifRect.Left
-        {
-            get { return 0; }
-        }
+        private static double GetPixelAspectRatio(byte rawAspectRatio) =>
+            rawAspectRatio == 0
+                ? 0.0
+                : (15 + rawAspectRatio) / 64.0;
 
-        int IGifRect.Top
-        {
-            get { return 0; }
-        }
+        int IGifRect.Left => 0;
+
+        int IGifRect.Top => 0;
     }
 }
