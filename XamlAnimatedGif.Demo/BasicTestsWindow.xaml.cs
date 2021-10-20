@@ -80,10 +80,7 @@ namespace XamlAnimatedGif.Demo
 
         private static void Decompress(byte[] buffer, GifImageData data, Stream destination)
         {
-            var reader = new GifBufferReader(buffer);
-            reader.Position = (int)data.CompressedDataStartOffset;
-            var raw = reader.ReadDataBlocks(new byte[data.Length]);
-            Lzw.Decompress(raw, destination, data.LzwMinimumCodeSize);
+            Lzw.Decompress(buffer.AsSpan((int)data.CompressedDataStartOffset, data.Length), destination, data.LzwMinimumCodeSize);
         }
 
         private async void BtnTestBrush_OnClick(object sender, RoutedEventArgs e)

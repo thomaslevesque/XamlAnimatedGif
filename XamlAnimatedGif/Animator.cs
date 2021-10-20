@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -438,22 +437,10 @@ namespace XamlAnimatedGif
         {
             var data = frame.ImageData;
             cancellationToken.ThrowIfCancellationRequested();
-            byte[] tempBuffer = null;
-            try
-            {
-                tempBuffer = ArrayPool<byte>.Shared.Rent(data.Length);
-                var reader = new GifBufferReader(_sourceBuffer) { Position = (int)data.CompressedDataStartOffset };
-                var lzwData = reader.ReadDataBlocks(tempBuffer);
-                var indexStream = new MemoryStream(_indexStreamBuffer);
-                Lzw.Decompress(lzwData, indexStream, data.LzwMinimumCodeSize);
-                indexStream.Position = 0;
-                return indexStream;
-            }
-            finally
-            {
-                if (tempBuffer is not null)
-                    ArrayPool<byte>.Shared.Return(tempBuffer);
-            }
+            var indexStream = new MemoryStream(_indexStreamBuffer);
+            Lzw.Decompress(_sourceBuffer.AsSpan((int)data.CompressedDataStartOffset, data.Length), indexStream, data.LzwMinimumCodeSize);
+            indexStream.Position = 0;
+            return indexStream;
         }
 
         internal BitmapSource Bitmap => _bitmap;

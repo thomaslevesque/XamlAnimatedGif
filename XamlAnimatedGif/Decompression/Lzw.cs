@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
 
@@ -8,9 +9,9 @@ namespace XamlAnimatedGif.Decompression
     {
         private const int MaxCodeLength = 12;
 
-        public static void Decompress(ReadOnlySpan<byte> source, Stream destination, int minimumCodeLength)
+        public static void Decompress(ReadOnlySpan<byte> dataBlocks, Stream destination, int minimumCodeLength)
         {
-            var bitReader = new BitReader(source);
+            var bitReader = new LzwBitReader(dataBlocks);
             var codeTable = new CodeTable(minimumCodeLength);
             int prevCode = 0;
 
@@ -107,12 +108,12 @@ namespace XamlAnimatedGif.Decompression
             private readonly int _minimumCodeLength;
             private readonly Sequence[] _table;
             private int _count;
-            private int _codeLength;
+            private byte _codeLength;
 
             public CodeTable(int minimumCodeLength)
             {
                 _minimumCodeLength = minimumCodeLength;
-                _codeLength = _minimumCodeLength + 1;
+                _codeLength = (byte)(_minimumCodeLength + 1);
                 int initialEntries = 1 << minimumCodeLength;
                 _table = new Sequence[1 << MaxCodeLength];
                 for (int i = 0; i < initialEntries; i++)
@@ -126,7 +127,7 @@ namespace XamlAnimatedGif.Decompression
             public void Reset()
             {
                 _count = (1 << _minimumCodeLength) + 2;
-                _codeLength = _minimumCodeLength + 1;
+                _codeLength = (byte)(_minimumCodeLength + 1);
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -144,6 +145,7 @@ namespace XamlAnimatedGif.Decompression
             public Sequence this[int index]
             {
                 [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                [DebuggerStepThrough]
                 get
                 {
                     return _table[index];
@@ -153,71 +155,15 @@ namespace XamlAnimatedGif.Decompression
             public int Count
             {
                 [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                [DebuggerStepThrough]
                 get => _count;
             }
 
-            public int CodeLength
+            public byte CodeLength
             {
                 [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                [DebuggerStepThrough]
                 get => _codeLength;
-            }
-        }
-        
-        ref struct BitReader
-        {
-            private readonly ReadOnlySpan<byte> _buffer;
-
-            public BitReader(ReadOnlySpan<byte> buffer)
-            {
-                _buffer = buffer;
-                _bytePosition = -1;
-                _bitPosition = 0;
-                _currentValue = -1;
-            }
-
-            private int _bytePosition;
-            private int _bitPosition;
-            private int _currentValue;
-
-            public int ReadBits(int bitCount)
-            {
-                // The following code assumes it's running on a little-endian architecture.
-                // It's probably safe to assume it will always be the case, because:
-                // - Windows only supports little-endian architectures: x86/x64 and ARM (which supports
-                //   both endiannesses, but Windows on ARM is always in little-endian mode)
-                // - No platforms other than Windows support XAML applications
-                // If the situation changes, this code will have to be updated.
-
-                if (_bytePosition == -1)
-                {
-                    _bytePosition = 0;
-                    _bitPosition = 0;
-                    _currentValue = ReadInt32();
-                }
-                else if (bitCount > 32 - _bitPosition)
-                {
-                    int n = _bitPosition >> 3;
-                    _bytePosition += n;
-                    _bitPosition &= 0x07;
-                    _currentValue = ReadInt32() >> _bitPosition;
-                }
-                int mask = (1 << bitCount) - 1;
-                int value = _currentValue & mask;
-                _currentValue >>= bitCount;
-                _bitPosition += bitCount;
-                return value;
-            }
-
-            private int ReadInt32()
-            {
-                int value = 0;
-                for (int i = 0; i < 4; i++)
-                {
-                    if (_bytePosition + i >= _buffer.Length)
-                        break;
-                    value |= _buffer[_bytePosition + i] << (i << 3);
-                }
-                return value;
             }
         }
     }
