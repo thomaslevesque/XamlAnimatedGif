@@ -27,9 +27,10 @@ namespace XamlAnimatedGif
             if (cacheStream == null)
             {
                 await DownloadToCacheFileAsync(uri, cacheFileName, progress);
+                cacheStream = await OpenTempFileStreamAsync(cacheFileName);
             }
             progress.Report(100);
-            return await OpenTempFileStreamAsync(cacheFileName);
+            return cacheStream;
         }
 
         private static async Task DownloadToCacheFileAsync(Uri uri, string fileName, IProgress<int> progress)
@@ -91,13 +92,13 @@ namespace XamlAnimatedGif
             string path = Path.Combine(Path.GetTempPath(), fileName);
             Stream stream = null;
             try
-            {
+            {  
                 stream = File.OpenRead(path);
             }
             catch (FileNotFoundException)
             {
             }
-            return Task.FromResult(stream);
+            return Task.FromResult(stream); 
         }
 
         private static Task<Stream> CreateTempFileStreamAsync(string fileName)
