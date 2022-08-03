@@ -92,13 +92,13 @@ namespace XamlAnimatedGif
             string path = Path.Combine(Path.GetTempPath(), fileName);
             Stream stream = null;
             try
-            {  
+            {
                 stream = File.OpenRead(path);
             }
             catch (FileNotFoundException)
             {
             }
-            return Task.FromResult(stream); 
+            return Task.FromResult(stream);
         }
 
         private static Task<Stream> CreateTempFileStreamAsync(string fileName)
